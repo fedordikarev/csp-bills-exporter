@@ -10,10 +10,21 @@ import (
 	"strings"
 )
 
-var AwsExportFields = map[string]bool{"lineItem/UsageEndDate": true, "lineItem/BlendedCost": true}
+var AwsExportFields = map[string]int{
+	"lineItem/UsageEndDate":   -1,
+	"lineItem/UsageStartDate": -1,
+	"lineItem/BlendedCost":    -1,
+	"lineItem/LineItemType":   -1,
+}
+var AwsOutFieldsOrder = [...]string{
+	"lineItem/UsageEndDate",
+	"lineItem/BlendedCost",
+	"lineItem/LineItemType",
+	"lineItem/UsageStartDate",
+}
 
-func parseCSV(fname string) {
-	f, err := os.Open(fname)
+func parseCSV(inFname string, outFname string) {
+	f, err := os.Open(inFname)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -21,7 +32,7 @@ func parseCSV(fname string) {
 
 	var r csv.Reader
 
-	if strings.HasSuffix(fname, ".gz") {
+	if strings.HasSuffix(inFname, ".gz") {
 		gr, err := gzip.NewReader(f)
 		if err != nil {
 			log.Fatal(err)
@@ -32,7 +43,7 @@ func parseCSV(fname string) {
 		r = *csv.NewReader(f)
 	}
 
-	fOut, err := os.Create("out-go.csv")
+	fOut, err := os.Create(outFname)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -41,21 +52,19 @@ func parseCSV(fname string) {
 	defer w.Flush()
 
 	headers, _ := r.Read()
-	fieldsNum := make([]int, 0)
 	for i, h := range headers {
-		if AwsExportFields[h] {
-			fieldsNum = append(fieldsNum, i)
+		if _, ok := AwsExportFields[h]; ok {
+			AwsExportFields[h] = i
 		}
 	}
-	outLen := len(fieldsNum)
+	outLen := len(AwsOutFieldsOrder)
 	out_rec := make([]string, outLen)
-	for j, idx := range fieldsNum {
-		out_rec[j] = headers[idx]
+	for j, h := range AwsOutFieldsOrder {
+		out_rec[j] = h
 	}
 	w.Write(out_rec)
 	// fmt.Println(out_rec)
 
-	// fmt.Println(fieldsNum)
 	for {
 		rec, err := r.Read()
 		if err == io.EOF {
@@ -65,8 +74,12 @@ func parseCSV(fname string) {
 			log.Fatal(err)
 		}
 		out_rec := make([]string, outLen)
-		for j, idx := range fieldsNum {
-			out_rec[j] = rec[idx]
+		for j, h := range AwsOutFieldsOrder {
+			if AwsExportFields[h] >= 0 {
+				out_rec[j] = rec[AwsExportFields[h]]
+			} else {
+				out_rec[j] = ""
+			}
 		}
 		// fmt.Println(out_rec)
 		w.Write(out_rec)
@@ -74,6 +87,6 @@ func parseCSV(fname string) {
 }
 
 func main() {
-	parseCSV("/Users/fe/w/aws-billing/daily-00001.csv.gz")
+	parseCSV(os.Args[1], os.Args[2])
 	fmt.Println("Hello!")
 }
