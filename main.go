@@ -8,9 +8,11 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 )
 
 var AwsExportFields = map[string]int{
+	"identity/TimeInterval":   -1,
 	"lineItem/UsageEndDate":   -1,
 	"lineItem/UsageStartDate": -1,
 	"lineItem/BlendedCost":    -1,
@@ -24,6 +26,9 @@ var AwsOutFieldsOrder = [...]string{
 }
 
 func parseCSV(inFname string, outFname string) {
+	timeIntervalsCounter := make(map[string]int, 0)
+	startDatesCounter := make(map[string]int, 0)
+	endDatesCounter := make(map[string]int, 0)
 	f, err := os.Open(inFname)
 	if err != nil {
 		log.Fatal(err)
@@ -59,12 +64,22 @@ func parseCSV(inFname string, outFname string) {
 	}
 	outLen := len(AwsOutFieldsOrder)
 	out_rec := make([]string, outLen)
-	for j, h := range AwsOutFieldsOrder {
-		out_rec[j] = h
-	}
+	copy(out_rec, AwsOutFieldsOrder[:])
+	/*
+		for j, h := range AwsOutFieldsOrder {
+			out_rec[j] = h
+		}
+	*/
 	w.Write(out_rec)
 	// fmt.Println(out_rec)
 
+	if AwsExportFields["identity/TimeInterval"] < 0 {
+		log.Fatal("No identity/TimeInterval field found. Bad billing report.")
+	}
+	idn_idx := AwsExportFields["identity/TimeInterval"]
+	today := time.Now().UTC()
+	midnight := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
+	yesterday := midnight.AddDate(0, 0, -1)
 	for {
 		rec, err := r.Read()
 		if err == io.EOF {
@@ -72,6 +87,14 @@ func parseCSV(inFname string, outFname string) {
 		}
 		if err != nil {
 			log.Fatal(err)
+		}
+		check_date_str, _, _ := strings.Cut(rec[idn_idx], "/")
+		check_date, err := time.Parse(time.RFC3339, check_date_str)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if check_date.After(midnight) || check_date.Before(yesterday) || check_date.Equal(midnight) {
+			continue
 		}
 		out_rec := make([]string, outLen)
 		for j, h := range AwsOutFieldsOrder {
@@ -83,6 +106,33 @@ func parseCSV(inFname string, outFname string) {
 		}
 		// fmt.Println(out_rec)
 		w.Write(out_rec)
+		if AwsExportFields["identity/TimeInterval"] > -1 {
+			timeInterval := rec[AwsExportFields["identity/TimeInterval"]]
+			timeIntervalsCounter[timeInterval] += 1
+		}
+		if AwsExportFields["lineItem/UsageStartDate"] > -1 {
+			timeInterval := rec[AwsExportFields["lineItem/UsageStartDate"]]
+			startDatesCounter[timeInterval] += 1
+		}
+		if AwsExportFields["lineItem/UsageEndDate"] > -1 {
+			timeInterval := rec[AwsExportFields["lineItem/UsageEndDate"]]
+			endDatesCounter[timeInterval] += 1
+		}
+	}
+
+	// fmt.Printf("%v\n", timeIntervalsCounter)
+	fmt.Println("timeIntervalsCounter")
+	for k, v := range timeIntervalsCounter {
+		fmt.Println(k, ":", v)
+	}
+	return
+	fmt.Println("startDatesCounter")
+	for k, v := range startDatesCounter {
+		fmt.Println(k, ":", v)
+	}
+	fmt.Println("endDatesCounter")
+	for k, v := range endDatesCounter {
+		fmt.Println(k, ":", v)
 	}
 }
 
